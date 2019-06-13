@@ -1,4 +1,4 @@
-#! python3
+#!/usr/bin/python3.5
 
 import sys
 import signal
@@ -13,6 +13,7 @@ from threading import Thread
 from itertools import zip_longest
 
 import paho.mqtt.client as mqtt
+import json
 
 # Initialise the PCA9685 using the default address (0x40).
 pwm = Adafruit_PCA9685.PCA9685()
@@ -27,8 +28,14 @@ servo_max = 540  # Max pulse length out of 4096
 current_angles = [20, 83, 155, 50, 35, 165]
 start_angles = (20, 83, 155, 50, 35, 165)
 
-vertical_position = 1
 movement_end = [0, 0, 0, 0, 0, 0]
+
+
+last_telemetry = {
+    "horizontal_angle": current_angles[0],
+    "grab_angle": current_angles[5],
+    "vertical_position": 1}
+
 
 client = mqtt.Client()
 connected = False
@@ -95,6 +102,7 @@ def use_claw(angle):
         else:
             thread = Thread(target=hold_pulse, args=(i, angle_to_pulse(abs(current_angles[5] - angle))))
         thread.start()
+    last_telemetry['grab_angle'] = angle
 
 
 def down():
@@ -109,6 +117,7 @@ def down():
         else:
             thread = Thread(target=hold_pulse, args=(i, angle_to_pulse(63 - start_angles[3])))
         thread.start()
+    last_telemetry['vertical_position'] = 0
 #    vertical_position = 0
 
 
@@ -124,6 +133,7 @@ def up():
         else:
             thread = Thread(target=hold_pulse, args=(i, angle_to_pulse(63 - start_angles[3])))
         thread.start()
+    last_telemetry['vertical_position'] = 1
 #    vertical_position = 1
 
 
@@ -136,6 +146,7 @@ def turn(angle):
         else:
             thread = Thread(target=hold_pulse, args=(i, angle_to_pulse(abs(current_angles[0] - angle))))
         thread.start()
+    last_telemetry['horizontal_angle'] = angle
 
 
 def set_all_servo_start():
@@ -160,7 +171,7 @@ def set_servo_start(servo_num):
             pwm.set_pwm(servo_num, 0, pulse_len)
     else:
         hold_pulse(servo_num, angle_to_pulse(60) - angle_to_pulse(start_angles[3]))
-    
+
     current_angles[servo_num] = start_angles[servo_num]
     movement_end[servo_num] = 1
 
@@ -192,11 +203,9 @@ def grouper(iterable, n, fillvalue=None):
 
 
 def send_telemetry():
-    global client, current_angles
+    global client, last_telemetry
 
-    client.publish('v1/devices/me/telemetry',
-        '{{"horizontal_angle":{}, "grab_angle":{}, "vertical_position":{}}}'
-         .format(current_angles[0], current_angles[5], vertical_position))
+    client.publish('v1/devices/me/telemetry', json.dumps(last_telemetry))
 
 
 def use_help_command(command_args):
@@ -226,6 +235,7 @@ def check_distance():
 
     pulse_duration = pulse_end_time - pulse_start_time
     distance = round(pulse_duration * 17150, 2)
+    print(distance)
 
     if distance < 8.5:
         vertical_position = 0
@@ -351,4 +361,5 @@ if __name__ == '__main__':
     main()
     client.loop_stop()
     client.disconnect()
+    GPIO.cleanup()
     sys.exit()
